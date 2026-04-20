@@ -140,7 +140,7 @@ Python engine). If you want to try a cloud model instead:
 
 1. Click **Settings** in the top bar.
 2. Pick a provider — **OpenAI** (`gpt-4o`, `gpt-4o-mini`) or
-   **Groq** (`llama-3.2-90b-vision-preview`, `llama-3.2-11b-vision-preview`).
+   **Groq** (`meta-llama/llama-4-scout-17b-16e-instruct`).
 3. Paste your API key and click **Test connection**.
 4. Click **Save**. Every new audit now scores through that model.
 5. Switch back to **Local** at any time.
@@ -148,9 +148,27 @@ Python engine). If you want to try a cloud model instead:
 API keys live only in your browser's localStorage and are sent straight to
 the provider you chose. The server never writes them to disk.
 
-If the LLM call fails for any reason (bad key, rate limit, network blip),
-the audit transparently falls back to the local Python engine so the
-supervisor on the floor is never left empty-handed.
+**How the online scoring works (dual-pass consensus).** Every audit makes
+**two** LLM calls in parallel with slightly different framings: one strict
+"head auditor" pass and one adversarial "skeptic" pass. The server then
+merges the two:
+
+- scores are averaged, but when the two passes disagree by 2+ points on any
+  S, the harsher score wins
+- issues are de-duplicated and escalated in severity when both passes flag
+  the same thing
+- a post-processing guard refuses to hand out 20/20 when issues are present
+
+This damps single-call exuberance (a lone LLM call sometimes returns
+"19/20 Green" with only one issue on a visibly cluttered zone) and pushes
+typical messy factory photos into the 10-14/20 Yellow/Red band they
+actually deserve. The trade-off is roughly doubled round-trip time
+(~3-5 s total), which is acceptable for audits.
+
+If the LLM call fails for any reason (bad key, rate limit, network blip,
+image too small), the audit transparently falls back to the local Python
+engine (or a neutral baseline on Vercel) with a clear failure reason in the
+action points, so the supervisor on the floor is never left empty-handed.
 
 ### 3. Install on your Home Screen (PWA)
 

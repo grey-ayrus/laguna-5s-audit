@@ -37,6 +37,11 @@ export async function analyzeAudit({ zoneId, imagesBase64, history, aiProvider, 
     throw new Error(`Unknown zone: ${zoneId}`);
   }
 
+  // Capture the last LLM failure so the fallback can tell the user why we
+  // could not score (e.g. "image too small" vs "API key missing") instead
+  // of always claiming no provider was configured.
+  let llmError = null;
+
   if (isOnlineProvider(aiProvider)) {
     try {
       const llmResult = await scoreWithLLM({
@@ -52,6 +57,7 @@ export async function analyzeAudit({ zoneId, imagesBase64, history, aiProvider, 
         engine: `llm:${aiProvider}:${aiModel}`,
       };
     } catch (err) {
+      llmError = err;
       console.warn(`LLM (${aiProvider}/${aiModel}) scoring failed, falling back to local engine:`, err.message);
     }
   }
@@ -72,23 +78,45 @@ export async function analyzeAudit({ zoneId, imagesBase64, history, aiProvider, 
     console.warn('Skipping Python engine on Vercel (no ENGINE_URL configured) - returning fallback.');
   }
 
-  return { ...buildFallback(zone), engine: 'fallback' };
+  return { ...buildFallback(zone, { llmError, aiProvider }), engine: 'fallback' };
 }
 
-function buildFallback(zone) {
+function buildFallback(zone, context = {}) {
+  const { llmError, aiProvider } = context;
   const onVercelWithoutEngine = process.env.VERCEL && !EXPLICIT_ENGINE_URL;
-  const actionPoints = onVercelWithoutEngine
+  const providerAttempted = isOnlineProvider(aiProvider);
+
+  // If the LLM was attempted and failed, surface the real reason instead of
+  // implying no provider was configured. Common cases: image too small,
+  // rate limit, transient 5xx. Keep the message compact and actionable.
+  const llmReason = llmError ? String(llmError.message || llmError).slice(0, 180) : null;
+
+  const actionPoints = llmReason
     ? [
-        'Open Settings and choose an online vision model (OpenAI or Groq), paste an API key, then re-run the audit.',
-        'Alternatively, deploy the Python engine on a traditional host and set ENGINE_URL in the Vercel project.',
+        `Re-take the photo(s): higher resolution, better lighting, and make sure the zone is clearly in frame.`,
+        `If the issue repeats, open Settings and try a different model or provider.`,
+        `LLM error recorded: ${llmReason}`,
       ]
-    : [
-        'AI engine is currently offline - results require manual verification.',
-        'Restart the Python service (npm run engine) and re-run the audit.',
-      ];
-  const summary = onVercelWithoutEngine
-    ? `${zone.code} ${zone.name} was not analysed because no AI provider is configured. Choose an online model in Settings or configure ENGINE_URL to enable scoring.`
-    : `${zone.code} ${zone.name} could not be analysed automatically because the AI engine is offline. A neutral baseline score of 10/20 has been recorded; please re-audit once the service is back online.`;
+    : onVercelWithoutEngine
+      ? [
+          'Open Settings and choose an online vision model (OpenAI or Groq), paste an API key, then re-run the audit.',
+          'Alternatively, deploy the Python engine on a traditional host and set ENGINE_URL in the Vercel project.',
+        ]
+      : [
+          'AI engine is currently offline - results require manual verification.',
+          'Restart the Python service (npm run engine) and re-run the audit.',
+        ];
+
+  const summary = llmReason
+    ? `${zone.code} ${zone.name} could not be scored: the vision model rejected the request (${llmReason}). A neutral baseline score of 10/20 has been recorded - please re-take the photos and re-submit.`
+    : onVercelWithoutEngine
+      ? `${zone.code} ${zone.name} was not analysed because no AI provider is configured. Choose an online model in Settings or configure ENGINE_URL to enable scoring.`
+      : `${zone.code} ${zone.name} could not be analysed automatically because the AI engine is offline. A neutral baseline score of 10/20 has been recorded; please re-audit once the service is back online.`;
+
+  const remarks = llmReason
+    ? `Audit not scored: ${providerAttempted ? 'online model returned an error' : 'no scoring engine available'}. Baseline values used.`
+    : 'Audit completed using fallback mode - no AI inference was performed.';
+
   return {
     zone: { id: zone.id, code: zone.code, name: zone.name, category: zone.category },
     scores: { sort: 2, setInOrder: 2, shine: 2, standardize: 2, sustain: 2, total: 10 },
@@ -96,7 +124,7 @@ function buildFallback(zone) {
     issuesByS: { sort: [], setInOrder: [], shine: [], standardize: [], sustain: [] },
     actionPoints,
     summary,
-    remarks: 'Audit completed using fallback mode - no AI inference was performed.',
+    remarks,
     annotations: [],
     annotatedImages: [],
     status: 'Yellow',
