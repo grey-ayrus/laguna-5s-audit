@@ -1,0 +1,10 @@
+# Optional - install only if you want YOLOv8 object detection enabled.
+#
+# This pulls in PyTorch which is large (~250 MB on Windows). On Windows you
+# also need long-path support enabled (Group Policy: "Enable Win32 long paths"
+# = Enabled), otherwise the pip install will fail with a "No such file" error
+# on long file names inside the torch wheel.
+#
+# When this is not installed, the Python engine automatically falls back to
+# OpenCV-only mode (heuristics for clutter, dirt, fabric scrap and stains).
+ultralytics==8.2.0

@@ -1,0 +1,30 @@
+node_modules/
+client/node_modules/
+.venv/
+.env
+.python-runtime.json
+uploads/
+pdfs/
+client/dist/
+python/__pycache__/
+python/**/__pycache__/
+python/yolov8*.pt
+python/fixtures/_debug/
+python/fixtures/*_annotated_v2.jpg
+*.log
+.DS_Store
+Thumbs.db
+
+.vercel
+.env*.local
+.env.local
+
+# Demo / release bundles (regenerable)
+dist/pdf-demo/
+dist/*.zip
+
+# Unrelated personal research drafts
+learning/
+
+# OS cruft
+*~

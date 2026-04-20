@@ -1,0 +1,46 @@
+{
+  "name": "laguna-5s-audit-system",
+  "version": "2.0.0",
+  "description": "Digital 5S Audit System for Laguna Clothing India Pvt Ltd - Node + React + Python (OpenCV / YOLOv8) all bootstrapped from npm install",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "postinstall": "node scripts/setup.mjs",
+    "predev": "node scripts/setup.mjs",
+    "dev": "concurrently --kill-others-on-fail --names server,client,engine --prefix-colors blue,green,magenta \"npm run server\" \"npm run client\" \"npm run engine\"",
+    "server": "nodemon server/index.js",
+    "client": "npm --prefix client run dev",
+    "engine": "node scripts/run-engine.mjs",
+    "build": "npm --prefix client run build",
+    "start": "node server/index.js"
+  },
+  "keywords": [
+    "5S",
+    "audit",
+    "manufacturing",
+    "quality",
+    "yolo",
+    "opencv",
+    "computer-vision"
+  ],
+  "author": "Laguna Clothing India Pvt Ltd",
+  "license": "ISC",
+  "dependencies": {
+    "@vercel/blob": "^2.3.3",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.0",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.13.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

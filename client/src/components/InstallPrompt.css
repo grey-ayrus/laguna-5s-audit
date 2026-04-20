@@ -1,0 +1,82 @@
+.install-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 14px;
+  margin: 16px 0;
+  background: linear-gradient(135deg, #1e3c72, #2563eb);
+  color: white;
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.06));
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.install-pill.ios {
+  background: #f1f5f9;
+  color: var(--color-text, #0f172a);
+  border: 1px solid var(--color-border, #e2e8f0);
+}
+
+.install-pill-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.install-pill-sub {
+  opacity: 0.9;
+}
+
+.install-pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.install-btn {
+  border-radius: 999px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 16px;
+  transition: background 0.15s ease;
+}
+
+.install-btn.primary {
+  background: white;
+  color: #1e3c72;
+}
+
+.install-btn.primary:hover { background: #e2e8f0; }
+
+.install-btn.ghost {
+  background: transparent;
+  color: inherit;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  opacity: 0.8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.install-pill:not(.ios) .install-btn.ghost {
+  border: 1px solid rgba(255,255,255,0.4);
+}
+.install-pill.ios .install-btn.ghost {
+  border: 1px solid var(--color-border, #e2e8f0);
+  color: var(--color-text-soft, #475569);
+}
+
+.install-btn.ghost:hover { opacity: 1; }
+
+@media (max-width: 560px) {
+  .install-pill { flex-direction: column; align-items: flex-start; }
+  .install-pill-actions { width: 100%; justify-content: flex-end; }
+}
