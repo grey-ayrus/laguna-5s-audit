@@ -13,7 +13,7 @@
 import Audit from '../models/Audit.js';
 import { analyzeAudit } from '../services/imageAnalysisService.js';
 import { generateAuditPDFBuffer } from '../services/pdfService.js';
-import { saveImage } from '../services/storageService.js';
+import { saveImage, deleteImage } from '../services/storageService.js';
 import { ZONES, resolveZone, LEGACY_SECTION_MAP, ZONE_BY_ID } from '../config/zones.js';
 
 const inMemoryAudits = [];
@@ -388,6 +388,77 @@ export async function downloadAuditPDF(req, res) {
   } catch (err) {
     console.error('downloadAuditPDF failed:', err);
     res.status(500).json({ error: 'Failed to generate PDF' });
+  }
+}
+
+/**
+ * Delete an audit and its stored images.
+ *
+ * We do a best-effort purge of both originals and annotated images (Blob or
+ * disk) before removing the record. Image-deletion errors are logged but do
+ * NOT block the record removal: once the supervisor says "delete this audit"
+ * they must not be left with a ghost entry in the list just because an
+ * orphan blob could not be reached.
+ */
+export async function deleteAudit(req, res) {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'id is required' });
+
+    const isMemoryId = id.startsWith('mem_');
+    let target = null;
+    let source = null;
+
+    if (useMongo() && !isMemoryId) {
+      try {
+        const doc = await Audit.findById(id).lean();
+        if (doc) { target = doc; source = 'mongodb'; }
+      } catch (err) {
+        console.warn('Mongo findById (delete) failed:', err.message);
+      }
+    }
+
+    if (!target) {
+      const idx = inMemoryAudits.findIndex((a) => a._id === id);
+      if (idx >= 0) {
+        target = inMemoryAudits[idx];
+        source = 'in-memory';
+      }
+    }
+
+    if (!target) return res.status(404).json({ error: 'Audit not found' });
+
+    // Purge the stored images (best effort).
+    const imagePurge = await Promise.allSettled(
+      (target.images || []).flatMap((img) => [img?.original, img?.annotated])
+        .filter(Boolean)
+        .map((url) => deleteImage(url)),
+    );
+    const purged = imagePurge.filter((r) => r.status === 'fulfilled' && r.value === true).length;
+
+    // Then remove the record.
+    if (source === 'mongodb') {
+      try {
+        await Audit.findByIdAndDelete(id);
+      } catch (err) {
+        console.error('Mongo delete failed:', err.message);
+        return res.status(500).json({ error: 'Failed to delete audit from database' });
+      }
+    } else {
+      const idx = inMemoryAudits.findIndex((a) => a._id === id);
+      if (idx >= 0) inMemoryAudits.splice(idx, 1);
+    }
+
+    res.json({
+      success: true,
+      id,
+      source,
+      imagesPurged: purged,
+      imagesTotal: imagePurge.length,
+    });
+  } catch (err) {
+    console.error('deleteAudit failed:', err);
+    res.status(500).json({ error: 'Failed to delete audit', details: err.message });
   }
 }
 

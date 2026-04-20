@@ -65,6 +65,37 @@ export async function saveImage({ prefix, index, timestamp, buffer, contentType 
 }
 
 /**
+ * Best-effort image delete. Never throws: the caller is deleting an audit
+ * and a stale/missing image should not block the record from being removed.
+ * Returns `true` if something was actually deleted.
+ *
+ * - Absolute https Blob URL  -> @vercel/blob `del()`
+ * - Local relative path      -> fs.unlink
+ * - data: URI / null / unknown shape -> no-op
+ */
+export async function deleteImage(urlOrPath) {
+  if (!urlOrPath || typeof urlOrPath !== 'string') return false;
+  if (urlOrPath.startsWith('data:')) return false;
+
+  try {
+    if (/^https?:\/\//i.test(urlOrPath)) {
+      const blob = await getBlob();
+      if (!blob) return false;
+      await blob.del(urlOrPath);
+      return true;
+    }
+    const full = path.isAbsolute(urlOrPath) ? urlOrPath : path.join(ROOT_DIR, urlOrPath);
+    if (fs.existsSync(full)) {
+      fs.unlinkSync(full);
+      return true;
+    }
+  } catch (err) {
+    console.warn(`deleteImage(${urlOrPath.slice(0, 60)}) failed:`, err.message);
+  }
+  return false;
+}
+
+/**
  * For legacy / already-saved image URLs: returns a Buffer for PDF embedding.
  * Works with both absolute blob URLs and local `uploads/foo.jpg` paths.
  */

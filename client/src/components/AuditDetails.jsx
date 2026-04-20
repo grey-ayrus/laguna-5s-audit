@@ -24,6 +24,7 @@ function AuditDetails() {
   const navigate = useNavigate();
   const [audit, setAudit] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +59,24 @@ function AuditDetails() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!audit?._id || deleting) return;
+    const label = `${audit.zoneCode} · ${audit.zoneName}`;
+    const when = new Date(audit.createdAt).toLocaleString();
+    if (!window.confirm(`Delete this audit?\n\n${label}\n${when}\n\nThis cannot be undone.`)) return;
+
+    setDeleting(true);
+    try {
+      await axios.delete(`/api/audits/${audit._id}`);
+      navigate('/', { replace: true });
+    } catch (err) {
+      console.error(err);
+      const msg = err?.response?.data?.error || err.message || 'unknown error';
+      alert(`Could not delete audit: ${msg}`);
+      setDeleting(false);
+    }
+  };
+
   if (loading) return <div className="container loading">Loading audit details…</div>;
   if (!audit) return <div className="container">Audit not found.</div>;
 
@@ -67,7 +86,17 @@ function AuditDetails() {
     <div className="container">
       <div className="details-header">
         <button className="btn-secondary" onClick={() => navigate('/')}>← Dashboard</button>
-        <button className="btn-primary" onClick={downloadPDF}>Download PDF</button>
+        <div className="details-header-actions">
+          <button
+            className="btn-danger details-header-delete"
+            onClick={handleDelete}
+            disabled={deleting}
+            aria-label={`Delete audit ${audit.zoneCode} ${audit.zoneName}`}
+          >
+            {deleting ? 'Deleting…' : 'Delete audit'}
+          </button>
+          <button className="btn-primary" onClick={downloadPDF}>Download PDF</button>
+        </div>
       </div>
 
       <div className="details-card">

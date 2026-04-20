@@ -5,6 +5,7 @@ import {
   getAuditById,
   getAuditStats,
   downloadAuditPDF,
+  deleteAudit,
   listZones,
 } from '../controllers/auditController.js';
 
@@ -16,5 +17,6 @@ router.post('/', createAudit);
 router.get('/', getAllAudits);
 router.get('/:id/pdf', downloadAuditPDF);
 router.get('/:id', getAuditById);
+router.delete('/:id', deleteAudit);
 
 export default router;

@@ -23,6 +23,35 @@ function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filterZone, setFilterZone] = useState('');
+  const [deletingIds, setDeletingIds] = useState(() => new Set());
+
+  const handleDeleteAudit = async (event, audit) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const label = `${audit.zoneCode} · ${audit.zoneName}`;
+    const when = new Date(audit.createdAt).toLocaleString();
+    if (!window.confirm(`Delete this audit?\n\n${label}\n${when}\n\nThis cannot be undone.`)) return;
+
+    setDeletingIds((prev) => new Set(prev).add(audit._id));
+    try {
+      await axios.delete(`/api/audits/${audit._id}`);
+      setAudits((prev) => prev.filter((a) => a._id !== audit._id));
+      try {
+        const statsRes = await axios.get('/api/audits/stats');
+        setStats(statsRes.data.stats || null);
+      } catch (err) { console.warn('Stats refresh after delete failed', err); }
+    } catch (err) {
+      console.error('Delete failed', err);
+      const msg = err?.response?.data?.error || err.message || 'unknown error';
+      alert(`Could not delete audit: ${msg}`);
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(audit._id);
+        return next;
+      });
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -204,40 +233,60 @@ function Dashboard() {
               No audits yet for this filter. Click <strong>+ New Audit</strong> to start.
             </div>
           ) : (
-            audits.map((audit) => (
-              <button
-                type="button"
-                key={audit._id}
-                className="audit-card"
-                onClick={() => navigate(`/audit/${audit._id}`)}
-              >
-                <div className="audit-card-header">
-                  <div>
-                    <div className="audit-card-zone-code">{audit.zoneCode}</div>
-                    <h4>{audit.zoneName}</h4>
-                  </div>
-                  <span className={statusBadgeClass(audit.status)}>{audit.status}</span>
-                </div>
-                <div className="audit-score">
-                  <div className="score-circle" style={{ borderColor: STATUS_COLORS[audit.status] || '#94a3b8' }}>
-                    <span className="score-value">{audit.scores?.total ?? 0}</span>
-                    <span className="score-label">/ 20</span>
-                  </div>
-                </div>
-                <div className="audit-details-small">
-                  {['sort', 'setInOrder', 'shine', 'standardize', 'sustain'].map((s) => (
-                    <div className="detail-row" key={s}>
-                      <span>{s === 'setInOrder' ? 'Set in Order' : s.charAt(0).toUpperCase() + s.slice(1)}</span>
-                      <span>{audit.scores?.[s] ?? 0}/4</span>
+            audits.map((audit) => {
+              const isDeleting = deletingIds.has(audit._id);
+              const open = () => navigate(`/audit/${audit._id}`);
+              return (
+                <div
+                  key={audit._id}
+                  className={`audit-card ${isDeleting ? 'audit-card-deleting' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+                  }}
+                >
+                  <div className="audit-card-header">
+                    <div>
+                      <div className="audit-card-zone-code">{audit.zoneCode}</div>
+                      <h4>{audit.zoneName}</h4>
                     </div>
-                  ))}
+                    <div className="audit-card-header-right">
+                      <span className={statusBadgeClass(audit.status)}>{audit.status}</span>
+                      <button
+                        type="button"
+                        className="btn-danger audit-card-delete"
+                        disabled={isDeleting}
+                        aria-label={`Delete audit ${audit.zoneCode} ${audit.zoneName}`}
+                        onClick={(e) => handleDeleteAudit(e, audit)}
+                      >
+                        {isDeleting ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="audit-score">
+                    <div className="score-circle" style={{ borderColor: STATUS_COLORS[audit.status] || '#94a3b8' }}>
+                      <span className="score-value">{audit.scores?.total ?? 0}</span>
+                      <span className="score-label">/ 20</span>
+                    </div>
+                  </div>
+                  <div className="audit-details-small">
+                    {['sort', 'setInOrder', 'shine', 'standardize', 'sustain'].map((s) => (
+                      <div className="detail-row" key={s}>
+                        <span>{s === 'setInOrder' ? 'Set in Order' : s.charAt(0).toUpperCase() + s.slice(1)}</span>
+                        <span>{audit.scores?.[s] ?? 0}/4</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="audit-meta-row">
+                    <span className="audit-category">{audit.zoneCategory}</span>
+                    <span className="audit-date">{new Date(audit.createdAt).toLocaleString()}</span>
+                  </div>
                 </div>
-                <div className="audit-meta-row">
-                  <span className="audit-category">{audit.zoneCategory}</span>
-                  <span className="audit-date">{new Date(audit.createdAt).toLocaleString()}</span>
-                </div>
-              </button>
-            ))
+              );
+            })
           )}
         </div>
       </div>

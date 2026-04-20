@@ -3,6 +3,17 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 18px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.details-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.details-header-delete {
+  padding: 10px 16px;
+  font-size: 13px;
 }
 
 .details-card {
