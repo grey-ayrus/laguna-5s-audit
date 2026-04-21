@@ -63,6 +63,17 @@ const SYSTEM_PROMPT_STRICT = [
   '    ("red bucket left on walkway near sewing machine 3", NOT "clutter present").',
   '  - Severity: "critical" for safety/contamination, "moderate" for workflow impact, "minor" for cosmetic.',
   '',
+  'Bounding-box rules (used to draw boxes on the capture for the auditor):',
+  '  - For EACH issue include a "box" field as [x, y, w, h] where all four numbers are NORMALISED to 0..1',
+  '    with (0,0) = top-left corner of the capture, (1,1) = bottom-right.',
+  '    Example: a defect in the centre of the image covering ~25% of width & height = [0.37, 0.37, 0.25, 0.25].',
+  '  - "image_index" MUST identify WHICH capture image the box is drawn on (0-based index into CAPTURES only).',
+  '  - If you genuinely cannot locate the defect, OMIT the box field entirely; do NOT guess [0,0,1,1] or [0.5,0.5,0,0].',
+  '  - Boxes must be tight around the defect, NOT the whole image. 0.02 <= w,h <= 0.85.',
+  '',
+  'Highlights (good things): Optionally return up to 4 "highlights" - elements in the capture that ARE done correctly',
+  '(properly labelled rack, clean walkway, tool on shadow board, etc.). Same box format, same image_index meaning.',
+  '',
   'Return STRICT JSON only, no Markdown, no prose outside the JSON.',
 ].join('\n');
 
@@ -81,6 +92,8 @@ const SYSTEM_PROMPT_SKEPTIC = [
   '',
   'Score on the same 1..36 per-S rubric, but bias toward the LOWER score when judgement is ambiguous.',
   'A score above 30 should be genuinely rare and only when the capture clearly matches the reference.',
+  'Include a "box" field per issue (normalised [x, y, w, h] in 0..1) pointing at WHERE on the capture the defect is.',
+  'Omit the box if you are not confident. Coords must satisfy 0 <= x, x+w <= 1 and 0 <= y, y+h <= 1.',
   'Return STRICT JSON only, matching the schema.',
 ].join('\n');
 
@@ -111,7 +124,13 @@ function buildUserPrompt(zone, history, hasReference) {
       "tag": "snake_case_code",
       "label": "Specific observation naming the object and its location in the capture",
       "severity": "minor|moderate|critical",
-      "image_index": 0 }
+      "image_index": 0,
+      "box": [0.0, 0.0, 0.0, 0.0] }
+  ],
+  "highlights": [
+    { "label": "Good practice visible in the capture (e.g. 'shadow board fully populated')",
+      "image_index": 0,
+      "box": [0.0, 0.0, 0.0, 0.0] }
   ],
   "actionPoints": ["imperative verb phrase 1", "imperative verb phrase 2", "..."],
   "summary": "3-4 sentences. Call out the biggest deviations from the reference first, not the positives.",
@@ -188,6 +207,50 @@ function clampScore(n) {
   return Math.min(SCORE_MAX_PER_S, Math.max(1, v));
 }
 
+/**
+ * Validate a raw box from the model. Returns a normalised [x, y, w, h]
+ * tuple in [0, 1] or null when the box is clearly bad.
+ *
+ * Rules:
+ *  - must be an array of 4 numeric values
+ *  - must satisfy 0 <= x < x+w <= 1 and 0 <= y < y+h <= 1 (after clamping)
+ *  - width & height must be in [MIN_SIDE, MAX_SIDE] so we drop point-boxes and full-frame boxes
+ */
+const BOX_MIN_SIDE = 0.015; // 1.5% of the image
+const BOX_MAX_SIDE = 0.9;   // 90% of the image
+function sanitiseBox(raw) {
+  if (!Array.isArray(raw) || raw.length < 4) return null;
+  let [x, y, w, h] = raw.map((v) => Number(v));
+  if (![x, y, w, h].every((v) => Number.isFinite(v))) return null;
+
+  // Some models return [x1, y1, x2, y2]. Detect & convert: if w or h > 1 OR
+  // if 3rd/4th values are larger than 1st/2nd by convention, treat as corners.
+  if (w > 1 || h > 1 || w > x + 1 || h > y + 1) {
+    const x2 = w; const y2 = h;
+    w = x2 - x; h = y2 - y;
+  }
+
+  x = Math.min(1, Math.max(0, x));
+  y = Math.min(1, Math.max(0, y));
+  w = Math.min(1 - x, Math.max(0, w));
+  h = Math.min(1 - y, Math.max(0, h));
+
+  if (w < BOX_MIN_SIDE || h < BOX_MIN_SIDE) return null;
+  if (w > BOX_MAX_SIDE && h > BOX_MAX_SIDE) return null; // covers whole frame, not useful
+
+  const round = (n) => Math.round(n * 1000) / 1000;
+  return [round(x), round(y), round(w), round(h)];
+}
+
+function severityColour(severity) {
+  switch (severity) {
+    case 'critical': return '#dc2626';
+    case 'moderate': return '#f97316';
+    case 'minor': return '#facc15';
+    default: return '#f97316';
+  }
+}
+
 function finalScore(total, imageCount) {
   const images = Math.max(1, Number(imageCount) || 1);
   const raw = total / (SCORE_MAX_TOTAL * images) * 10;
@@ -210,16 +273,41 @@ function normalise(raw, zone, imageCount) {
   const issues = Array.isArray(raw?.issues) ? raw.issues : [];
   const cleanedIssues = issues
     .filter((i) => i && S_KEYS.includes(i.s))
-    .map((i) => ({
-      s: i.s,
-      tag: String(i.tag || i.label || 'issue').slice(0, 60),
-      label: String(i.label || i.tag || 'Issue detected').slice(0, 240),
-      severity: ['minor', 'moderate', 'critical'].includes(i.severity) ? i.severity : 'moderate',
-      image_index: Math.min(
+    .map((i) => {
+      const imageIndex = Math.min(
         Math.max(Number.isFinite(+i.image_index) ? +i.image_index : 0, 0),
         Math.max(imageCount - 1, 0),
-      ),
-    }));
+      );
+      const severity = ['minor', 'moderate', 'critical'].includes(i.severity) ? i.severity : 'moderate';
+      const box = sanitiseBox(i.box ?? i.bbox ?? i.bounding_box);
+      return {
+        s: i.s,
+        tag: String(i.tag || i.label || 'issue').slice(0, 60),
+        label: String(i.label || i.tag || 'Issue detected').slice(0, 240),
+        severity,
+        image_index: imageIndex,
+        box,
+        color: severityColour(severity),
+      };
+    });
+
+  const rawHighlights = Array.isArray(raw?.highlights) ? raw.highlights : [];
+  const highlights = rawHighlights
+    .map((h) => {
+      const imageIndex = Math.min(
+        Math.max(Number.isFinite(+h?.image_index) ? +h.image_index : 0, 0),
+        Math.max(imageCount - 1, 0),
+      );
+      const box = sanitiseBox(h?.box ?? h?.bbox ?? h?.bounding_box);
+      return {
+        label: String(h?.label || 'Good practice').slice(0, 200),
+        image_index: imageIndex,
+        box,
+        color: '#16a34a',
+      };
+    })
+    .filter((h) => h.box) // highlights without a box aren't useful to draw
+    .slice(0, 6);
 
   const issuesByS = S_KEYS.reduce((acc, s) => {
     acc[s] = cleanedIssues.filter((i) => i.s === s).map((i) => i.label);
@@ -236,6 +324,7 @@ function normalise(raw, zone, imageCount) {
     status: statusForFinal(scores.totalFinal),
     issues: cleanedIssues,
     issuesByS,
+    highlights,
     actionPoints: actionPoints.length
       ? actionPoints
       : [`Review ${S_LABELS.sort.toLowerCase()} and ${S_LABELS.shine.toLowerCase()} findings and assign owners.`],
@@ -337,12 +426,23 @@ function mergeResults(a, b, zone, imageCount) {
     .filter(Boolean)
     .slice(0, 8);
 
+  // Merge highlights: dedupe by (image_index + label-prefix) and keep first box.
+  const hlSeen = new Map();
+  for (const src of [a.highlights || [], b.highlights || []]) {
+    for (const h of src) {
+      const key = `${h.image_index}|${(h.label || '').toLowerCase().slice(0, 40)}`;
+      if (!hlSeen.has(key)) hlSeen.set(key, h);
+    }
+  }
+  const highlights = Array.from(hlSeen.values()).slice(0, 6);
+
   return {
     zone: { id: zone.id, code: zone.code, name: zone.name, category: zone.category },
     scores,
     status: statusForFinal(scores.totalFinal),
     issues,
     issuesByS,
+    highlights,
     actionPoints: actionPoints.length ? actionPoints : [
       `Walk the zone again and document Sort and Shine findings with photos.`,
       `Assign owners for the open items and re-audit within one week.`,

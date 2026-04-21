@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
+import AnnotatedImage from './AnnotatedImage';
 import './AuditDetails.css';
 
 const STATUS_COLORS = { Green: '#16a34a', Yellow: '#d97706', Red: '#dc2626' };
@@ -168,10 +169,22 @@ function AuditDetails() {
             {(audit.images || []).map((img, idx) => {
               const src = img.annotated || img.original;
               const href = /^(https?:|data:)/i.test(src) ? src : `/${src}`;
+              const issueCount = (audit.issues || []).filter((i) => (i.imageIndex ?? i.image_index ?? 0) === idx && Array.isArray(i.box)).length;
+              const hlCount = (audit.highlights || []).filter((h) => (h.imageIndex ?? h.image_index ?? 0) === idx && Array.isArray(h.box)).length;
+              const annotationCount = issueCount + hlCount;
               return (
                 <figure className="annotated-card" key={idx}>
-                  <img src={href} alt={`Capture ${idx + 1}`} />
-                  <figcaption>{img.annotated ? `Capture ${idx + 1} · annotated` : `Capture ${idx + 1}`}</figcaption>
+                  <AnnotatedImage
+                    src={href}
+                    alt={`Capture ${idx + 1}`}
+                    imageIndex={idx}
+                    issues={audit.issues || []}
+                    highlights={audit.highlights || []}
+                  />
+                  <figcaption>
+                    Capture {idx + 1}
+                    {annotationCount > 0 ? ` · ${annotationCount} annotation${annotationCount === 1 ? '' : 's'}` : ''}
+                  </figcaption>
                 </figure>
               );
             })}

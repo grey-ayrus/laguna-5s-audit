@@ -172,6 +172,7 @@ function buildFallback(zone, imageCount, context = {}) {
     scores,
     issues: [],
     issuesByS: { sort: [], setInOrder: [], shine: [], standardize: [], sustain: [] },
+    highlights: [],
     actionPoints,
     summary,
     remarks,

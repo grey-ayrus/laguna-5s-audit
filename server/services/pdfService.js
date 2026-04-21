@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { loadImageBuffer } from './storageService.js';
 import { loadReferenceImageForZone } from './referenceImageService.js';
+import { getImageDimensions } from './imageDimensions.js';
 
 const SCORE_LABELS = {
   sort: 'Sort (Seiri)',
@@ -27,11 +28,97 @@ function dataUrlToBuffer(dataUrl) {
   try { return Buffer.from(m[1], 'base64'); } catch (_) { return null; }
 }
 
+// Severity -> text colour for the issues-detected list. We use the same
+// palette in the box-overlay below but slightly darker for text contrast.
 const SEVERITY_COLOR = {
   critical: '#b91c1c',
   moderate: '#b45309',
   minor: '#15803d',
 };
+
+// Brighter palette for the coloured rectangles drawn on top of the image
+// itself, matching the client overlay.
+const BOX_COLOR_BY_SEVERITY = {
+  critical: '#dc2626',
+  moderate: '#f97316',
+  minor: '#facc15',
+};
+
+function boxColourForSeverity(sev) {
+  return BOX_COLOR_BY_SEVERITY[sev] || BOX_COLOR_BY_SEVERITY.moderate;
+}
+
+/**
+ * Draw `buffer` at `(x, y)` with the given maximum target width/height while
+ * preserving the source image's aspect ratio. Also returns the actual drawn
+ * width/height so the caller can overlay shapes at the exact same scale.
+ *
+ * This mirrors what `doc.image(buffer, { fit: [w, h] })` does internally but
+ * gives us the dimensions we need to draw aligned annotations.
+ */
+function drawImageWithDimensions(doc, buffer, x, y, maxWidth, maxHeight) {
+  const dims = getImageDimensions(buffer);
+  if (!dims) {
+    doc.image(buffer, x, y, { fit: [maxWidth, maxHeight] });
+    return { width: maxWidth, height: maxHeight, x, y };
+  }
+  const ratio = dims.width / dims.height;
+  let drawW = maxWidth;
+  let drawH = drawW / ratio;
+  if (drawH > maxHeight) {
+    drawH = maxHeight;
+    drawW = drawH * ratio;
+  }
+  const drawX = x + (maxWidth - drawW) / 2;
+  const drawY = y + (maxHeight - drawH) / 2;
+  doc.image(buffer, drawX, drawY, { width: drawW, height: drawH });
+  return { width: drawW, height: drawH, x: drawX, y: drawY };
+}
+
+/**
+ * Draw all issue & highlight boxes for a single capture. Coordinates on the
+ * input are NORMALISED [x, y, w, h] (each value 0..1); we multiply by the
+ * drawn image dimensions to get PDF points.
+ */
+function drawBoxesOverImage(doc, { issues = [], highlights = [] }, imageIndex, frame) {
+  const relevantIssues = issues.filter((i) => (i.imageIndex ?? i.image_index ?? 0) === imageIndex && Array.isArray(i.box) && i.box.length === 4);
+  const relevantHighlights = highlights.filter((h) => (h.imageIndex ?? h.image_index ?? 0) === imageIndex && Array.isArray(h.box) && h.box.length === 4);
+
+  if (!relevantIssues.length && !relevantHighlights.length) return 0;
+
+  doc.save();
+
+  // Highlights first (green, dashed) so issues render on top.
+  for (const h of relevantHighlights) {
+    const [bx, by, bw, bh] = h.box;
+    const x = frame.x + bx * frame.width;
+    const y = frame.y + by * frame.height;
+    const w = bw * frame.width;
+    const bh2 = bh * frame.height;
+    doc.lineWidth(1.5).dash(4, { space: 2 }).strokeColor('#16a34a').rect(x, y, w, bh2).stroke();
+    doc.undash();
+  }
+
+  for (const i of relevantIssues) {
+    const [bx, by, bw, bh] = i.box;
+    const x = frame.x + bx * frame.width;
+    const y = frame.y + by * frame.height;
+    const w = bw * frame.width;
+    const bh2 = bh * frame.height;
+    const colour = boxColourForSeverity(i.severity);
+    doc.lineWidth(i.severity === 'critical' ? 2.5 : 1.8).strokeColor(colour).rect(x, y, w, bh2).stroke();
+
+    // Small filled tag with the severity initial in the top-left corner.
+    const tag = (i.severity || 'M')[0].toUpperCase();
+    const tagW = 12;
+    const tagH = 12;
+    doc.fillColor(colour).rect(x, y, tagW, tagH).fill();
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9).text(tag, x + 2.8, y + 2.2, { lineBreak: false });
+  }
+
+  doc.restore();
+  return relevantIssues.length + relevantHighlights.length;
+}
 
 /**
  * Generates the audit PDF entirely in memory and resolves with a Buffer.
@@ -142,18 +229,61 @@ export function generateAuditPDFBuffer(audit) {
       const images = audit.images || [];
       for (let idx = 0; idx < images.length; idx++) {
         const img = images[idx];
-        const source = img.annotated || img.original;
+        const source = img.original || img.annotated; // Prefer the raw capture so our own box-overlay stays visible.
         if (!source) continue;
         const buffer = await loadImageBuffer(source).catch(() => null);
         if (!buffer) continue;
         doc.addPage();
         doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
-          .text(`Captured Image ${idx + 1}${img.annotated ? ' (annotated)' : ''}`, { underline: true });
+          .text(`Captured Image ${idx + 1}`, { underline: true });
         doc.moveDown(0.4);
+
+        // Leave room underneath for a short list of annotations.
+        const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+        const startY = doc.y + 4;
+        const maxHeight = 520;
+        let frame;
         try {
-          doc.image(buffer, { fit: [500, 600], align: 'center' });
+          frame = drawImageWithDimensions(
+            doc,
+            buffer,
+            doc.page.margins.left,
+            startY,
+            pageWidth,
+            maxHeight,
+          );
         } catch (imgErr) {
           doc.fillColor('#b91c1c').text(`Image could not be embedded: ${imgErr.message}`);
+          continue;
+        }
+
+        const drawnCount = drawBoxesOverImage(doc, {
+          issues: audit.issues || [],
+          highlights: audit.highlights || [],
+        }, idx, frame);
+
+        // Cursor lands below the drawn image.
+        doc.y = frame.y + frame.height + 14;
+
+        const annotationsForImage = (audit.issues || []).filter((i) => (i.imageIndex ?? i.image_index ?? 0) === idx && Array.isArray(i.box));
+        const highlightsForImage = (audit.highlights || []).filter((h) => (h.imageIndex ?? h.image_index ?? 0) === idx && Array.isArray(h.box));
+
+        if (drawnCount > 0) {
+          doc.font('Helvetica-Bold').fontSize(10).fillColor('#1e3c72')
+            .text(`Annotations (${drawnCount})`);
+          doc.moveDown(0.1);
+          doc.font('Helvetica').fontSize(9);
+          annotationsForImage.forEach((issue, n) => {
+            const colour = boxColourForSeverity(issue.severity);
+            doc.fillColor(colour)
+              .text(`${n + 1}. [${(issue.severity || 'moderate').toUpperCase()}] ${issue.label}`);
+          });
+          if (highlightsForImage.length) {
+            doc.fillColor('#16a34a');
+            highlightsForImage.forEach((h) => {
+              doc.text(`OK · ${h.label}`);
+            });
+          }
         }
       }
 

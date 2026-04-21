@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import CameraCapture from './CameraCapture';
+import AnnotatedImage from './AnnotatedImage';
 import { getAiSettings, aiPayload, getProvider } from '../lib/aiSettings';
 import './NewAudit.css';
 
@@ -384,8 +385,22 @@ function NewAudit() {
             const href = /^(https?:|data:)/i.test(src) ? src : `/${src}`;
             return (
               <figure className="annotated-card" key={idx}>
-                <img src={href} alt={`Annotated ${idx + 1}`} />
-                <figcaption>{img.annotated ? `Image ${idx + 1} · annotated` : `Image ${idx + 1}`}</figcaption>
+                <AnnotatedImage
+                  src={href}
+                  alt={`Capture ${idx + 1}`}
+                  imageIndex={idx}
+                  issues={result.issues || []}
+                  highlights={result.highlights || []}
+                />
+                <figcaption>
+                  Image {idx + 1}
+                  {(() => {
+                    const issueCount = (result.issues || []).filter((i) => (i.imageIndex ?? i.image_index ?? 0) === idx && Array.isArray(i.box)).length;
+                    const hlCount = (result.highlights || []).filter((h) => (h.imageIndex ?? h.image_index ?? 0) === idx && Array.isArray(h.box)).length;
+                    const total = issueCount + hlCount;
+                    return total > 0 ? ` · ${total} annotation${total === 1 ? '' : 's'}` : '';
+                  })()}
+                </figcaption>
               </figure>
             );
           })}

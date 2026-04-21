@@ -182,6 +182,11 @@ export async function createAudit(req, res) {
         imageIndex: i.image_index ?? 0,
         box: i.box || undefined,
       })),
+      highlights: (result.highlights || []).map((h) => ({
+        label: h.label,
+        imageIndex: h.image_index ?? 0,
+        box: h.box || undefined,
+      })).filter((h) => Array.isArray(h.box) && h.box.length === 4),
       actionPoints: result.actionPoints || [],
       summary: result.summary || '',
       remarks: result.remarks || '',

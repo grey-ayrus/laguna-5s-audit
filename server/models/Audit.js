@@ -6,6 +6,15 @@ const issueSchema = new mongoose.Schema({
   severity: { type: String, enum: ['minor', 'moderate', 'critical'], default: 'moderate' },
   tag: { type: String },
   imageIndex: { type: Number, default: 0 },
+  // Normalised bounding box [x, y, w, h] in 0..1. Omitted when the LLM could
+  // not pinpoint the defect on the capture.
+  box: { type: [Number], default: undefined },
+}, { _id: false });
+
+// Good things visible in the capture. Drawn with green boxes.
+const highlightSchema = new mongoose.Schema({
+  label: { type: String, required: true },
+  imageIndex: { type: Number, default: 0 },
   box: { type: [Number], default: undefined },
 }, { _id: false });
 
@@ -44,6 +53,7 @@ const auditSchema = new mongoose.Schema({
   },
 
   issues: { type: [issueSchema], default: [] },
+  highlights: { type: [highlightSchema], default: [] },
   actionPoints: { type: [String], default: [] },
   summary: { type: String, default: '' },
   remarks: { type: String, default: '' },
