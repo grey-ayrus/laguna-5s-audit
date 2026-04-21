@@ -15,6 +15,14 @@ import { analyzeAudit } from '../services/imageAnalysisService.js';
 import { generateAuditPDFBuffer } from '../services/pdfService.js';
 import { saveImage, deleteImage } from '../services/storageService.js';
 import { loadReferenceImageForZone } from '../services/referenceImageService.js';
+import {
+  appendAudit as appendZoneHistory,
+  readZoneHistory,
+  findAuditById as findAuditInBlob,
+  deleteAuditById as deleteFromZoneHistory,
+  newAuditId as newBlobAuditId,
+  HISTORY_LIMIT as ZONE_HISTORY_LIMIT,
+} from '../services/zoneHistoryService.js';
 import { ZONES, resolveZone, LEGACY_SECTION_MAP, ZONE_BY_ID } from '../config/zones.js';
 
 const S_KEYS = ['sort', 'setInOrder', 'shine', 'standardize', 'sustain'];
@@ -202,12 +210,21 @@ export async function createAudit(req, res) {
         saved = (await doc.save()).toObject();
       } catch (dbErr) {
         console.warn('Mongo save failed - using in-memory storage:', dbErr.message);
-        saved = { _id: `mem_${inMemoryCounter++}`, ...auditDoc };
+        saved = { _id: newBlobAuditId(), ...auditDoc };
         inMemoryAudits.push(saved);
       }
     } else {
-      saved = { _id: `mem_${inMemoryCounter++}`, ...auditDoc };
+      saved = { _id: newBlobAuditId(), ...auditDoc };
       inMemoryAudits.push(saved);
+    }
+
+    // Persist the last-3 rolling history per zone. This survives Vercel cold
+    // starts (in-memory does not). Best-effort: a blob failure must not
+    // break the audit creation response.
+    try {
+      await appendZoneHistory(saved);
+    } catch (err) {
+      console.warn('zoneHistory append failed:', err.message);
     }
 
     res.status(201).json({ success: true, audit: saved, storage: useMongo() ? 'mongodb' : 'in-memory' });
@@ -320,7 +337,8 @@ export async function getAuditById(req, res) {
   try {
     const { id } = req.params;
     let audit;
-    if (useMongo() && !id.startsWith('mem_')) {
+    const looksLikeMongo = !id.startsWith('mem_') && !id.startsWith('blob_');
+    if (useMongo() && looksLikeMongo) {
       try {
         const doc = await Audit.findById(id).lean();
         if (doc) audit = migrateLegacy(doc);
@@ -332,11 +350,53 @@ export async function getAuditById(req, res) {
       audit = inMemoryAudits.find((a) => a._id === id);
       if (audit) audit = migrateLegacy(audit);
     }
+    // Last resort: scan the per-zone blob history. This is what lets an
+    // audit survive a Vercel cold start.
+    if (!audit) {
+      const fromBlob = await findAuditInBlob(id);
+      if (fromBlob) audit = migrateLegacy(fromBlob);
+    }
     if (!audit) return res.status(404).json({ error: 'Audit not found' });
     res.json({ success: true, audit });
   } catch (err) {
     console.error('getAuditById failed:', err);
     res.status(500).json({ error: 'Failed to fetch audit' });
+  }
+}
+
+/**
+ * Last N audits for a zone (most recent first). Backed by Vercel Blob so
+ * history survives Vercel cold starts. N is fixed by ZONE_HISTORY_LIMIT.
+ */
+export async function getZoneHistory(req, res) {
+  try {
+    const { zoneId } = req.params;
+    const zone = resolveZone(zoneId);
+    if (!zone) return res.status(404).json({ error: `Unknown zone: ${zoneId}` });
+
+    const blobHistory = await readZoneHistory(zone.id);
+
+    // Merge with in-memory audits on this instance so an audit created
+    // seconds ago (blob write may still be propagating) is never missing.
+    const seen = new Set(blobHistory.map((a) => a._id));
+    const memExtras = inMemoryAudits
+      .filter((a) => a.zoneId === zone.id && !seen.has(a._id));
+
+    const combined = [...blobHistory, ...memExtras]
+      .map(migrateLegacy)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, ZONE_HISTORY_LIMIT);
+
+    res.json({
+      success: true,
+      zone,
+      limit: ZONE_HISTORY_LIMIT,
+      count: combined.length,
+      audits: combined,
+    });
+  } catch (err) {
+    console.error('getZoneHistory failed:', err);
+    res.status(500).json({ error: 'Failed to fetch zone history' });
   }
 }
 
@@ -433,7 +493,8 @@ export async function downloadAuditPDF(req, res) {
   try {
     const { id } = req.params;
     let audit;
-    if (useMongo() && !id.startsWith('mem_')) {
+    const looksLikeMongo = !id.startsWith('mem_') && !id.startsWith('blob_');
+    if (useMongo() && looksLikeMongo) {
       try {
         const doc = await Audit.findById(id).lean();
         if (doc) audit = migrateLegacy(doc);
@@ -444,6 +505,10 @@ export async function downloadAuditPDF(req, res) {
     if (!audit) {
       audit = inMemoryAudits.find((a) => a._id === id);
       if (audit) audit = migrateLegacy(audit);
+    }
+    if (!audit) {
+      const fromBlob = await findAuditInBlob(id);
+      if (fromBlob) audit = migrateLegacy(fromBlob);
     }
     if (!audit) return res.status(404).json({ error: 'Audit not found' });
 
@@ -474,10 +539,11 @@ export async function deleteAudit(req, res) {
     if (!id) return res.status(400).json({ error: 'id is required' });
 
     const isMemoryId = id.startsWith('mem_');
+    const isBlobId = id.startsWith('blob_');
     let target = null;
     let source = null;
 
-    if (useMongo() && !isMemoryId) {
+    if (useMongo() && !isMemoryId && !isBlobId) {
       try {
         const doc = await Audit.findById(id).lean();
         if (doc) { target = doc; source = 'mongodb'; }
@@ -492,6 +558,11 @@ export async function deleteAudit(req, res) {
         target = inMemoryAudits[idx];
         source = 'in-memory';
       }
+    }
+
+    if (!target) {
+      const fromBlob = await findAuditInBlob(id);
+      if (fromBlob) { target = fromBlob; source = 'blob-history'; }
     }
 
     if (!target) return res.status(404).json({ error: 'Audit not found' });
@@ -515,6 +586,14 @@ export async function deleteAudit(req, res) {
     } else {
       const idx = inMemoryAudits.findIndex((a) => a._id === id);
       if (idx >= 0) inMemoryAudits.splice(idx, 1);
+    }
+
+    // Always also remove from the per-zone blob history so it doesn't
+    // reappear after a cold start.
+    try {
+      await deleteFromZoneHistory(id, target.zoneId);
+    } catch (err) {
+      console.warn('zoneHistory delete failed:', err.message);
     }
 
     res.json({

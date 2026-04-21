@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import ZoneHome from './components/ZoneHome';
+import ZonePage from './components/ZonePage';
 import NewAudit from './components/NewAudit';
 import AuditDetails from './components/AuditDetails';
 import Settings from './components/Settings';
@@ -32,6 +33,7 @@ function App() {
         <main>
           <Routes>
             <Route path="/" element={<ZoneHome />} />
+            <Route path="/zone/:zoneId" element={<ZonePage />} />
             <Route path="/new-audit" element={<NewAudit />} />
             <Route path="/audit/:id" element={<AuditDetails />} />
             <Route path="/settings" element={<Settings />} />

@@ -77,7 +77,9 @@ function ZoneHome() {
   }, [audits]);
 
   const handleZoneClick = (zoneId) => {
-    navigate(`/new-audit?zone=${encodeURIComponent(zoneId)}`);
+    // Open the per-zone detail page which shows the last 3 audits and a
+    // "Start new audit" button. Auditors can review history before shooting.
+    navigate(`/zone/${encodeURIComponent(zoneId)}`);
   };
 
   const handleDeleteAudit = async (event, audit) => {

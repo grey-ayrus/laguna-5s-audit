@@ -7,11 +7,13 @@ import {
   downloadAuditPDF,
   deleteAudit,
   listZones,
+  getZoneHistory,
 } from '../controllers/auditController.js';
 
 const router = express.Router();
 
 router.get('/zones', listZones);
+router.get('/zones/:zoneId/history', getZoneHistory);
 router.get('/stats', getAuditStats);
 router.post('/', createAudit);
 router.get('/', getAllAudits);
