@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { loadImageBuffer } from './storageService.js';
+import { loadReferenceImageForZone } from './referenceImageService.js';
 
 const SCORE_LABELS = {
   sort: 'Sort (Seiri)',
@@ -8,6 +9,23 @@ const SCORE_LABELS = {
   standardize: 'Standardize (Seiketsu)',
   sustain: 'Sustain (Shitsuke)',
 };
+
+const SCORE_MAX_PER_S = 36;
+const SCORE_MAX_TOTAL = SCORE_MAX_PER_S * 5;
+
+function fmtFinal(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v.toFixed(2) : '0.00';
+}
+
+// Convert a data URL (data:image/jpeg;base64,...) into a plain Buffer
+// that pdfkit can embed. Returns null on failure.
+function dataUrlToBuffer(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const m = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
+  if (!m) return null;
+  try { return Buffer.from(m[1], 'base64'); } catch (_) { return null; }
+}
 
 const SEVERITY_COLOR = {
   critical: '#b91c1c',
@@ -53,11 +71,18 @@ export function generateAuditPDFBuffer(audit) {
       doc.font('Helvetica').fontSize(11).fillColor('#222');
       ['sort', 'setInOrder', 'shine', 'standardize', 'sustain'].forEach((s) => {
         const score = audit.scores?.[s] ?? 0;
-        doc.text(`${SCORE_LABELS[s].padEnd(28, ' ')}  ${score}/4`);
+        doc.text(`${SCORE_LABELS[s].padEnd(28, ' ')}  ${score}/${SCORE_MAX_PER_S}`);
       });
       doc.moveDown(0.4);
-      doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
-        .text(`Total: ${audit.scores?.total ?? 0}/20`);
+      const total = audit.scores?.total ?? 0;
+      const imageCount = audit.scores?.imageCount ?? Math.max(1, (audit.images || []).length || 1);
+      const totalFinal = audit.scores?.totalFinal
+        ?? (total / (SCORE_MAX_TOTAL * imageCount)) * 10;
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#1e3c72')
+        .text(`Raw total: ${total}/${SCORE_MAX_TOTAL * imageCount} (${imageCount} image${imageCount === 1 ? '' : 's'})`);
+      doc.moveDown(0.2);
+      doc.font('Helvetica-Bold').fontSize(15).fillColor('#1e3c72')
+        .text(`Final score: ${fmtFinal(totalFinal)} / 10.00   (${audit.status})`);
       doc.moveDown(0.8);
 
       doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
@@ -88,6 +113,32 @@ export function generateAuditPDFBuffer(audit) {
         doc.text(`${i + 1}. ${point}`);
       });
 
+      // Reference / "standard" page. Try the zone's canonical reference first
+      // (reliably bundled with the function), then fall back to whatever URL
+      // was stored on the audit document.
+      const referenceBuffer = await (async () => {
+        const canonical = dataUrlToBuffer(loadReferenceImageForZone(audit.zoneId));
+        if (canonical) return canonical;
+        if (audit.referenceImage) {
+          return await loadImageBuffer(audit.referenceImage).catch(() => null);
+        }
+        return null;
+      })();
+
+      if (referenceBuffer) {
+        doc.addPage();
+        doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
+          .text('Reference (Standard) Image', { underline: true });
+        doc.font('Helvetica').fontSize(10).fillColor('#666')
+          .text('The zone should look like this when 5S is fully implemented.');
+        doc.moveDown(0.4);
+        try {
+          doc.image(referenceBuffer, { fit: [500, 600], align: 'center' });
+        } catch (imgErr) {
+          doc.fillColor('#b91c1c').text(`Reference image could not be embedded: ${imgErr.message}`);
+        }
+      }
+
       const images = audit.images || [];
       for (let idx = 0; idx < images.length; idx++) {
         const img = images[idx];
@@ -97,7 +148,7 @@ export function generateAuditPDFBuffer(audit) {
         if (!buffer) continue;
         doc.addPage();
         doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
-          .text(`Audit Image ${idx + 1}${img.annotated ? ' (annotated)' : ''}`, { underline: true });
+          .text(`Captured Image ${idx + 1}${img.annotated ? ' (annotated)' : ''}`, { underline: true });
         doc.moveDown(0.4);
         try {
           doc.image(buffer, { fit: [500, 600], align: 'center' });

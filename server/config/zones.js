@@ -279,6 +279,23 @@ export const ZONES = [
   },
 ];
 
+/**
+ * Attach a reference image path to every zone.
+ *
+ * Reference images live in client/public/reference-images/ as zone-<N>.jpg.
+ * The React client loads them directly by URL; the server ships the URL
+ * to the browser via /api/audits/zones so the "standard" photo can be shown
+ * in the audit UI and also sent to the vision LLM alongside the capture.
+ *
+ * When Dhanesh shares the definitive filename-to-zone mapping just drop
+ * the new files into client/public/reference-images/ with the same names -
+ * no code change needed.
+ */
+for (const zone of ZONES) {
+  const n = Number(zone.id.replace('zone-', ''));
+  zone.referenceImage = Number.isFinite(n) ? `/reference-images/zone-${n}.jpg` : null;
+}
+
 export const ZONE_BY_ID = Object.fromEntries(ZONES.map((z) => [z.id, z]));
 export const ZONE_BY_NAME = Object.fromEntries(ZONES.map((z) => [`${z.code} ${z.name}`, z]));
 export const ZONE_LABELS = ZONES.map((z) => `${z.code} ${z.name}`);

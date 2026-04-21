@@ -18,18 +18,29 @@ const auditSchema = new mongoose.Schema({
   // Backwards-compat with the previous /v1 schema. Filled in for legacy audits.
   legacySectionName: { type: String, default: null },
 
+  // URL/path to the per-zone reference ("standard") image that was used to
+  // score this audit. Cached on the document so the PDF and details page
+  // keep rendering the same reference even if the mapping changes later.
+  referenceImage: { type: String, default: null },
+
   images: [{
     original: { type: String, required: true },
     annotated: { type: String, default: null },
   }],
 
+  // Each S is scored 1..36 (per image); total is the sum of the 5 S's (5..180).
+  // totalFinal is the normalised display score (0.00..10.00), independent of
+  // how many images the auditor uploaded, computed as:
+  //   totalFinal = total / (180 * imageCount) * 10, rounded to 2 decimals.
   scores: {
-    sort:        { type: Number, required: true, min: 1, max: 4 },
-    setInOrder:  { type: Number, required: true, min: 1, max: 4 },
-    shine:       { type: Number, required: true, min: 1, max: 4 },
-    standardize: { type: Number, required: true, min: 1, max: 4 },
-    sustain:     { type: Number, required: true, min: 1, max: 4 },
-    total:       { type: Number, required: true, min: 5, max: 20 },
+    sort:        { type: Number, required: true, min: 1, max: 36 },
+    setInOrder:  { type: Number, required: true, min: 1, max: 36 },
+    shine:       { type: Number, required: true, min: 1, max: 36 },
+    standardize: { type: Number, required: true, min: 1, max: 36 },
+    sustain:     { type: Number, required: true, min: 1, max: 36 },
+    total:       { type: Number, required: true, min: 5, max: 180 },
+    totalFinal:  { type: Number, required: true, min: 0, max: 10 },
+    imageCount:  { type: Number, required: true, min: 1, max: 4 },
   },
 
   issues: { type: [issueSchema], default: [] },

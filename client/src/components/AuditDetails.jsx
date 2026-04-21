@@ -81,11 +81,20 @@ function AuditDetails() {
   if (!audit) return <div className="container">Audit not found.</div>;
 
   const total = audit.scores?.total ?? 0;
+  const imageCount = audit.scores?.imageCount ?? Math.max(1, (audit.images || []).length || 1);
+  const finalRaw = audit.scores?.totalFinal;
+  const finalScore = Number.isFinite(Number(finalRaw))
+    ? Number(finalRaw)
+    : (total / (180 * imageCount)) * 10;
+
+  const referenceHref = audit.referenceImage
+    ? (/^(https?:|data:)/i.test(audit.referenceImage) ? audit.referenceImage : audit.referenceImage.startsWith('/') ? audit.referenceImage : `/${audit.referenceImage}`)
+    : null;
 
   return (
     <div className="container">
       <div className="details-header">
-        <button className="btn-secondary" onClick={() => navigate('/')}>← Dashboard</button>
+        <button className="btn-secondary" onClick={() => navigate('/')}>← Zones</button>
         <div className="details-header-actions">
           <button
             className="btn-danger details-header-delete"
@@ -111,18 +120,21 @@ function AuditDetails() {
           </div>
           <div className="result-score-block">
             <div className="result-score-circle" style={{ borderColor: STATUS_COLORS[audit.status] }}>
-              <span className="result-score-value">{total}</span>
-              <span className="result-score-label">/ 20</span>
+              <span className="result-score-value">{finalScore.toFixed(2)}</span>
+              <span className="result-score-label">/ 10.00</span>
             </div>
             <span className={statusBadgeClass(audit.status)}>{audit.status}</span>
+            <div className="result-score-breakdown">
+              Raw total {total}/{180 * imageCount} · {imageCount} image{imageCount === 1 ? '' : 's'}
+            </div>
           </div>
         </div>
 
         <div className="scores-grid-v2">
           {['sort', 'setInOrder', 'shine', 'standardize', 'sustain'].map((s) => {
             const score = audit.scores?.[s] ?? 0;
-            const pct = (score / 4) * 100;
-            const tone = score === 4 ? 'good' : score === 3 ? 'okay' : score === 2 ? 'warn' : 'bad';
+            const pct = (score / 36) * 100;
+            const tone = score >= 33 ? 'good' : score >= 25 ? 'okay' : score >= 17 ? 'warn' : 'bad';
             return (
               <div className={`score-row tone-${tone}`} key={s}>
                 <div className="score-row-label">
@@ -132,7 +144,7 @@ function AuditDetails() {
                 <div className="score-row-bar">
                   <div className="score-row-fill" style={{ width: `${pct}%` }} />
                 </div>
-                <div className="score-row-value">{score}/4</div>
+                <div className="score-row-value">{score}/36</div>
               </div>
             );
           })}
@@ -145,15 +157,21 @@ function AuditDetails() {
           </div>
         )}
 
-        {audit.images && audit.images.length > 0 && (
+        {(referenceHref || (audit.images && audit.images.length > 0)) && (
           <div className="annotated-grid">
-            {audit.images.map((img, idx) => {
+            {referenceHref && (
+              <figure className="annotated-card annotated-card-reference">
+                <img src={referenceHref} alt={`Reference for ${audit.zoneCode}`} />
+                <figcaption>Reference (standard)</figcaption>
+              </figure>
+            )}
+            {(audit.images || []).map((img, idx) => {
               const src = img.annotated || img.original;
               const href = /^(https?:|data:)/i.test(src) ? src : `/${src}`;
               return (
                 <figure className="annotated-card" key={idx}>
-                  <img src={href} alt={`Audit image ${idx + 1}`} />
-                  <figcaption>{img.annotated ? `Image ${idx + 1} · annotated` : `Image ${idx + 1}`}</figcaption>
+                  <img src={href} alt={`Capture ${idx + 1}`} />
+                  <figcaption>{img.annotated ? `Capture ${idx + 1} · annotated` : `Capture ${idx + 1}`}</figcaption>
                 </figure>
               );
             })}

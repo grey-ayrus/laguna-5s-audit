@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import CameraCapture from './CameraCapture';
 import { getAiSettings, aiPayload, getProvider } from '../lib/aiSettings';
@@ -38,6 +38,7 @@ function statusBadgeClass(status) {
 
 function NewAudit() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [zones, setZones] = useState([]);
   const [zoneFilter, setZoneFilter] = useState('');
   const [step, setStep] = useState(1);
@@ -51,6 +52,11 @@ function NewAudit() {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
+  const preselectZoneId = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('zone');
+  }, [location.search]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -61,6 +67,16 @@ function NewAudit() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // When we arrive with ?zone=zone-X, jump straight to Step 2 once zones load.
+  useEffect(() => {
+    if (!preselectZoneId || !zones.length || selectedZone) return;
+    const match = zones.find((z) => z.id === preselectZoneId);
+    if (match) {
+      setSelectedZone(match);
+      setStep(2);
+    }
+  }, [preselectZoneId, zones, selectedZone]);
 
   const groupedZones = useMemo(() => {
     const filter = zoneFilter.trim().toLowerCase();
@@ -207,11 +223,33 @@ function NewAudit() {
           <h3>Step 2 · Capture or upload images</h3>
           <p className="step-subtitle">
             Add between {MIN_IMAGES} and {MAX_IMAGES} images for <strong>{selectedZone?.code} · {selectedZone?.name}</strong>.
-            More angles give the AI a clearer picture.
+            The AI scores how close your capture is to the reference photo on the left.
           </p>
         </div>
         <button className="btn-secondary" onClick={() => { setStep(1); setImages([]); }}>← Change zone</button>
       </div>
+
+      {selectedZone?.referenceImage && (
+        <div className="reference-panel">
+          <div className="reference-panel-body">
+            <img
+              src={selectedZone.referenceImage}
+              alt={`Reference for ${selectedZone.code}`}
+              className="reference-panel-image"
+            />
+            <div className="reference-panel-text">
+              <div className="reference-panel-label">Reference (Standard)</div>
+              <h4>{selectedZone.code} · {selectedZone.name}</h4>
+              <p>
+                This is the target condition for this zone. Your capture below will be compared to
+                this image on all 5 S's (Sort, Set in Order, Shine, Standardize, Sustain). Each S is
+                scored from <strong>1 to 36</strong>, and the final score is normalised to
+                a <strong>/10.00</strong> grade.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="upload-actions">
         <label className="upload-button">
@@ -288,6 +326,11 @@ function NewAudit() {
   const renderResult = () => {
     if (!result) return null;
     const total = result.scores?.total ?? 0;
+    const imageCount = result.scores?.imageCount ?? Math.max(1, (result.images || []).length || 1);
+    const finalRaw = result.scores?.totalFinal;
+    const finalScore = Number.isFinite(Number(finalRaw))
+      ? Number(finalRaw)
+      : (total / (180 * imageCount)) * 10;
     return (
       <div className="step-container">
         <div className="result-header">
@@ -300,18 +343,21 @@ function NewAudit() {
           </div>
           <div className="result-score-block">
             <div className="result-score-circle" style={{ borderColor: STATUS_COLORS[result.status] }}>
-              <span className="result-score-value">{total}</span>
-              <span className="result-score-label">/ 20</span>
+              <span className="result-score-value">{finalScore.toFixed(2)}</span>
+              <span className="result-score-label">/ 10.00</span>
             </div>
             <span className={statusBadgeClass(result.status)}>{result.status}</span>
+            <div className="result-score-breakdown">
+              Raw total {total}/{180 * imageCount} · {imageCount} image{imageCount === 1 ? '' : 's'}
+            </div>
           </div>
         </div>
 
         <div className="scores-grid-v2">
           {['sort', 'setInOrder', 'shine', 'standardize', 'sustain'].map((s) => {
             const score = result.scores?.[s] ?? 0;
-            const pct = (score / 4) * 100;
-            const tone = score === 4 ? 'good' : score === 3 ? 'okay' : score === 2 ? 'warn' : 'bad';
+            const pct = (score / 36) * 100;
+            const tone = score >= 33 ? 'good' : score >= 25 ? 'okay' : score >= 17 ? 'warn' : 'bad';
             return (
               <div className={`score-row tone-${tone}`} key={s}>
                 <div className="score-row-label">
@@ -321,7 +367,7 @@ function NewAudit() {
                 <div className="score-row-bar">
                   <div className="score-row-fill" style={{ width: `${pct}%` }} />
                 </div>
-                <div className="score-row-value">{score}/4</div>
+                <div className="score-row-value">{score}/36</div>
               </div>
             );
           })}
@@ -372,7 +418,7 @@ function NewAudit() {
         <div className="step-actions">
           <button className="btn-secondary" onClick={handleNewAudit}>+ New audit</button>
           <button className="btn-secondary" onClick={downloadPDF}>Download PDF</button>
-          <button className="btn-primary" onClick={() => navigate('/')}>Back to dashboard</button>
+          <button className="btn-primary" onClick={() => navigate('/')}>Back to zones</button>
         </div>
       </div>
     );
@@ -382,7 +428,7 @@ function NewAudit() {
     <div className="container">
       <div className="new-audit-header">
         <h2>New 5S Audit</h2>
-        <button className="btn-secondary" onClick={() => navigate('/')}>← Dashboard</button>
+        <button className="btn-secondary" onClick={() => navigate('/')}>← Zones</button>
       </div>
 
       <div className="stepper">

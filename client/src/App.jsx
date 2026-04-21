@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
-import Dashboard from './components/Dashboard';
+import ZoneHome from './components/ZoneHome';
 import NewAudit from './components/NewAudit';
 import AuditDetails from './components/AuditDetails';
 import Settings from './components/Settings';
@@ -21,7 +21,7 @@ function App() {
                 </div>
               </div>
               <nav className="header-nav">
-                <NavLink to="/" end>Dashboard</NavLink>
+                <NavLink to="/" end>Zones</NavLink>
                 <NavLink to="/new-audit">New Audit</NavLink>
                 <NavLink to="/settings">Settings</NavLink>
               </nav>
@@ -31,7 +31,7 @@ function App() {
 
         <main>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<ZoneHome />} />
             <Route path="/new-audit" element={<NewAudit />} />
             <Route path="/audit/:id" element={<AuditDetails />} />
             <Route path="/settings" element={<Settings />} />

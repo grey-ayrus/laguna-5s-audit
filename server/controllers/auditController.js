@@ -14,7 +14,52 @@ import Audit from '../models/Audit.js';
 import { analyzeAudit } from '../services/imageAnalysisService.js';
 import { generateAuditPDFBuffer } from '../services/pdfService.js';
 import { saveImage, deleteImage } from '../services/storageService.js';
+import { loadReferenceImageForZone } from '../services/referenceImageService.js';
 import { ZONES, resolveZone, LEGACY_SECTION_MAP, ZONE_BY_ID } from '../config/zones.js';
+
+const S_KEYS = ['sort', 'setInOrder', 'shine', 'standardize', 'sustain'];
+const SCORE_MAX_PER_S = 36;
+const SCORE_MAX_TOTAL = SCORE_MAX_PER_S * S_KEYS.length;
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function statusForFinal(totalFinal) {
+  if (totalFinal >= 8.0) return 'Green';
+  if (totalFinal >= 5.0) return 'Yellow';
+  return 'Red';
+}
+
+// Ensure every audit we hand back to the client has the /10 final score
+// computed, even if it was written under the older /20 schema.
+function ensureTotalFinal(audit) {
+  if (!audit) return audit;
+  const scores = audit.scores || {};
+
+  if (Number.isFinite(scores.totalFinal) && Number.isFinite(scores.imageCount)) {
+    return audit;
+  }
+
+  const total = Number(scores.total);
+  let imageCount = Number(scores.imageCount);
+  if (!Number.isFinite(imageCount) || imageCount < 1) {
+    imageCount = Array.isArray(audit.images) ? Math.max(1, audit.images.length) : 1;
+  }
+
+  // If each S is within 1..4, the record used the legacy /20 rubric: lift it.
+  const allSmall = S_KEYS.every((s) => Number(scores[s]) >= 1 && Number(scores[s]) <= 4);
+  let newScores = { ...scores, imageCount };
+  if (allSmall) {
+    for (const s of S_KEYS) newScores[s] = Math.min(SCORE_MAX_PER_S, Math.max(1, Math.round(Number(scores[s]) * 9)));
+    newScores.total = S_KEYS.reduce((sum, s) => sum + newScores[s], 0);
+  } else if (!Number.isFinite(total)) {
+    newScores.total = S_KEYS.reduce((sum, s) => sum + (Number(scores[s]) || 0), 0);
+  }
+
+  newScores.totalFinal = round2(newScores.total / (SCORE_MAX_TOTAL * imageCount) * 10);
+  return { ...audit, scores: newScores, status: statusForFinal(newScores.totalFinal) };
+}
 
 const inMemoryAudits = [];
 let inMemoryCounter = 1;
@@ -46,11 +91,14 @@ async function fetchHistory(zoneId) {
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, HISTORY_LIMIT);
   }
-  return history.map((a) => ({
-    scores: a.scores,
-    issues: (a.issues || []).map((i) => ({ tag: i.tag, label: i.label, s: i.s })),
-    createdAt: a.createdAt,
-  }));
+  return history.map((a) => {
+    const ensured = ensureTotalFinal(a);
+    return {
+      scores: ensured.scores,
+      issues: (a.issues || []).map((i) => ({ tag: i.tag, label: i.label, s: i.s })),
+      createdAt: a.createdAt,
+    };
+  });
 }
 
 export async function createAudit(req, res) {
@@ -74,10 +122,12 @@ export async function createAudit(req, res) {
     }
 
     const history = await fetchHistory(zone.id);
+    const referenceImage = loadReferenceImageForZone(zone.id);
 
     const result = await analyzeAudit({
       zoneId: zone.id,
       imagesBase64: imagesBase64.map((b) => `data:image/jpeg;base64,${b}`),
+      referenceImage,
       history,
       aiProvider,
       aiModel,
@@ -106,14 +156,24 @@ export async function createAudit(req, res) {
       return { original, annotated };
     }));
 
+    // Defensive: some engines (older Python, fallback) may not emit the new
+    // fields - fill them so the Audit model's validation passes.
+    const scoresOut = { ...(result.scores || {}) };
+    if (!Number.isFinite(scoresOut.imageCount)) scoresOut.imageCount = imagesBase64.length;
+    if (!Number.isFinite(scoresOut.totalFinal)) {
+      const t = Number(scoresOut.total) || 0;
+      scoresOut.totalFinal = round2(t / (SCORE_MAX_TOTAL * scoresOut.imageCount) * 10);
+    }
+
     const auditDoc = {
       zoneId: zone.id,
       zoneCode: zone.code,
       zoneName: zone.name,
       zoneCategory: zone.category,
       legacySectionName: null,
+      referenceImage: zone.referenceImage || null,
       images: savedImages,
-      scores: result.scores,
+      scores: scoresOut,
       issues: (result.issues || []).map((i) => ({
         s: i.s,
         label: i.label,
@@ -125,7 +185,7 @@ export async function createAudit(req, res) {
       actionPoints: result.actionPoints || [],
       summary: result.summary || '',
       remarks: result.remarks || '',
-      status: result.status,
+      status: result.status || statusForFinal(scoresOut.totalFinal),
       engine: result.engine || 'python',
       createdAt: new Date(),
     };
@@ -154,13 +214,16 @@ export async function createAudit(req, res) {
 
 function migrateLegacy(doc) {
   if (!doc) return doc;
-  if (doc.zoneId) return doc;
+
+  // Modern docs: just ensure the /10 final score field is populated.
+  if (doc.zoneId) return ensureTotalFinal(doc);
 
   const sectionName = doc.sectionName || doc.legacySectionName;
   const mappedZoneId = sectionName ? LEGACY_SECTION_MAP[sectionName] : null;
   const zone = mappedZoneId ? ZONE_BY_ID[mappedZoneId] : null;
 
-  // Convert old /20 scores to /4 buckets so they fit the new dashboard.
+  // Convert old /20 scores to /4 buckets first; ensureTotalFinal lifts /4 to
+  // /36 automatically.
   const toBucket = (n) => {
     if (n == null) return 2;
     const v = Number(n);
@@ -179,13 +242,11 @@ function migrateLegacy(doc) {
   };
   newScores.total = newScores.sort + newScores.setInOrder + newScores.shine + newScores.standardize + newScores.sustain;
 
-  const status = newScores.total >= 16 ? 'Green' : newScores.total >= 11 ? 'Yellow' : 'Red';
-
   const images = [];
   if (doc.referenceImage) images.push({ original: doc.referenceImage, annotated: null });
   if (doc.currentImage) images.push({ original: doc.currentImage, annotated: null });
 
-  return {
+  const migrated = {
     ...doc,
     zoneId: zone ? zone.id : 'legacy',
     zoneCode: zone ? zone.code : 'Legacy',
@@ -201,9 +262,9 @@ function migrateLegacy(doc) {
     actionPoints: doc.actionPoints || [],
     summary: doc.remarks || `Legacy audit migrated from ${sectionName || 'unknown section'}.`,
     remarks: doc.remarks || '',
-    status,
     isLegacy: true,
   };
+  return ensureTotalFinal(migrated);
 }
 
 export async function getAllAudits(req, res) {
@@ -316,10 +377,12 @@ function computeStats(audits) {
       });
     }
     const z = byZone.get(a.zoneId);
-    z.totalScore += a.scores.total;
+    // Use totalFinal (/10) so audits with different image counts are comparable.
+    const final = Number(a.scores?.totalFinal) || 0;
+    z.totalScore += final;
     z.count += 1;
     if (!z.latestAt || new Date(a.createdAt) > new Date(z.latestAt)) {
-      z.latestScore = a.scores.total;
+      z.latestScore = final;
       z.latestAt = a.createdAt;
     }
 
@@ -328,7 +391,7 @@ function computeStats(audits) {
     const dateStr = new Date(a.createdAt).toISOString().split('T')[0];
     if (!byDate.has(dateStr)) byDate.set(dateStr, { totalScore: 0, count: 0 });
     const d = byDate.get(dateStr);
-    d.totalScore += a.scores.total;
+    d.totalScore += final;
     d.count += 1;
   });
 
