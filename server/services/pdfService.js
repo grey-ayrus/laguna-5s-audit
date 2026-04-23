@@ -172,11 +172,14 @@ export function generateAuditPDFBuffer(audit) {
         .text(`Final score: ${fmtFinal(totalFinal)} / 10.00   (${audit.status})`);
       doc.moveDown(0.8);
 
-      doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
-        .text('Zone Summary', { underline: true });
-      doc.font('Helvetica').fontSize(10).fillColor('#222')
-        .text(audit.summary || audit.remarks || 'No summary available.', { align: 'justify' });
-      doc.moveDown(0.8);
+      const summaryText = (audit.summary || audit.remarks || '').trim();
+      if (summaryText) {
+        doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
+          .text('Zone Summary', { underline: true });
+        doc.font('Helvetica').fontSize(10).fillColor('#222')
+          .text(summaryText, { align: 'justify' });
+        doc.moveDown(0.8);
+      }
 
       if (Array.isArray(audit.strengths) && audit.strengths.length > 0) {
         doc.font('Helvetica-Bold').fontSize(13).fillColor('#15803d')

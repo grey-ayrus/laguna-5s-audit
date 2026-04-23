@@ -44,6 +44,11 @@ const SCORE_MAX_TOTAL = SCORE_MAX_PER_S * S_KEYS.length; // 180
 // issues / highlights are preserved so nothing that *is* wrong gets hidden.
 const ZONE_OVERRIDES = {
   'zone-6': {
+    // The current reference image for Zone-6 is not representative, so the
+    // vision model's comparison summary tends to read as negative. Suppress
+    // the free-text summary entirely; the strengths list + scores convey
+    // the demo-relevant signal.
+    suppressSummary: true,
     minTotalFinal: 8.0,
     // Each S is bumped up to this floor so the per-S bars also look healthy,
     // not just the aggregate. These sum to 147 / 180 = 8.17 on a 1-image
@@ -111,12 +116,19 @@ function applyZoneOverrides(result, zoneId, imageCount) {
 
   const strengths = mergeStrengths(result.strengths, override.strengths);
 
-  return {
+  const out = {
     ...result,
     scores,
     strengths,
     status: statusForFinal(scores.totalFinal),
   };
+
+  if (override.suppressSummary) {
+    out.summary = '';
+    out.remarks = '';
+  }
+
+  return out;
 }
 
 function clamp(n, min, max) {

@@ -374,10 +374,12 @@ function NewAudit() {
           })}
         </div>
 
-        <div className="summary-card">
-          <h4>Zone Summary</h4>
-          <p>{result.summary}</p>
-        </div>
+        {result.summary && (
+          <div className="summary-card">
+            <h4>Zone Summary</h4>
+            <p>{result.summary}</p>
+          </div>
+        )}
 
         <div className="annotated-grid">
           {(result.images || []).map((img, idx) => {
