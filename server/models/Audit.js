@@ -54,6 +54,10 @@ const auditSchema = new mongoose.Schema({
 
   issues: { type: [issueSchema], default: [] },
   highlights: { type: [highlightSchema], default: [] },
+  // Short positive observations ("PPE present", "first-aid kit placed"). Shown
+  // as a green checklist next to Issues Detected so strong zones still get
+  // credit for what's going right.
+  strengths: { type: [String], default: [] },
   actionPoints: { type: [String], default: [] },
   summary: { type: String, default: '' },
   remarks: { type: String, default: '' },

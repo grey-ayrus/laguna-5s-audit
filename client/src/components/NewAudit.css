@@ -342,22 +342,65 @@
 
 .summary-card,
 .issues-card,
-.actions-card {
+.actions-card,
+.strengths-card {
   background: #f8fafc;
   border-radius: var(--radius-md);
   padding: 18px 22px;
   margin-bottom: 18px;
   border-left: 4px solid var(--color-primary);
 }
+.strengths-card {
+  background: #f0fdf4;
+  border-left-color: #16a34a;
+}
 .summary-card h4,
 .issues-card h4,
-.actions-card h4 {
+.actions-card h4,
+.strengths-card h4 {
   font-size: 14px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-primary);
   margin-bottom: 10px;
   font-weight: 700;
+}
+.strengths-card h4 {
+  color: #15803d;
+}
+.strengths-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.strengths-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #14532d;
+}
+.strength-check {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #16a34a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.strength-text {
+  flex: 1;
+  padding-top: 2px;
 }
 .summary-card p {
   color: var(--color-text);

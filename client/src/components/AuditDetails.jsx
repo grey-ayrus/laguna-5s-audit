@@ -191,6 +191,20 @@ function AuditDetails() {
           </div>
         )}
 
+        {audit.strengths && audit.strengths.length > 0 && (
+          <div className="strengths-card">
+            <h4>What's going well ({audit.strengths.length})</h4>
+            <ul className="strengths-list">
+              {audit.strengths.map((s, i) => (
+                <li key={i}>
+                  <span className="strength-check" aria-hidden="true">✓</span>
+                  <span className="strength-text">{s}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="issues-card">
           <h4>Issues Detected ({audit.issues?.length || 0})</h4>
           {audit.issues && audit.issues.length > 0 ? (

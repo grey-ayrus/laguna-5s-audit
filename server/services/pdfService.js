@@ -178,6 +178,16 @@ export function generateAuditPDFBuffer(audit) {
         .text(audit.summary || audit.remarks || 'No summary available.', { align: 'justify' });
       doc.moveDown(0.8);
 
+      if (Array.isArray(audit.strengths) && audit.strengths.length > 0) {
+        doc.font('Helvetica-Bold').fontSize(13).fillColor('#15803d')
+          .text(`What's going well (${audit.strengths.length})`, { underline: true });
+        doc.font('Helvetica').fontSize(10).fillColor('#14532d');
+        audit.strengths.forEach((s) => {
+          doc.text(`\u2713  ${s}`);
+        });
+        doc.moveDown(0.8);
+      }
+
       doc.font('Helvetica-Bold').fontSize(13).fillColor('#1e3c72')
         .text('Issues Detected', { underline: true });
       doc.font('Helvetica').fontSize(10);
@@ -289,7 +299,7 @@ export function generateAuditPDFBuffer(audit) {
 
       doc.end();
     } catch (err) {
-      reject(err);
+        reject(err);
     }
   });
 }

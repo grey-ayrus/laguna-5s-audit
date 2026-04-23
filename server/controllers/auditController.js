@@ -195,6 +195,9 @@ export async function createAudit(req, res) {
         imageIndex: h.image_index ?? 0,
         box: h.box || undefined,
       })).filter((h) => Array.isArray(h.box) && h.box.length === 4),
+      strengths: Array.isArray(result.strengths)
+        ? result.strengths.filter((s) => typeof s === 'string' && s.trim().length > 0)
+        : [],
       actionPoints: result.actionPoints || [],
       summary: result.summary || '',
       remarks: result.remarks || '',
